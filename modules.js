@@ -258,11 +258,16 @@ class Service {
                 }
                 
                 let content = undefined
-                if (parsed.choices !== undefined) {
-                    content = parsed.choices[0].delta.content;
-                } else if (parsed.candidates !== undefined) {
+                if (parsed.choices !== undefined && parsed.choices.length > 0) {
+                    // Some providers send chunks without delta (e.g. usage stats)
+                    if (parsed.choices[0].delta !== undefined && parsed.choices[0].delta.content !== undefined) {
+                        content = parsed.choices[0].delta.content;
+                    } else if (parsed.choices[0].message !== undefined && parsed.choices[0].message.content !== undefined) {
+                        content = parsed.choices[0].message.content;
+                    }
+                } else if (parsed.candidates !== undefined && parsed.candidates.length > 0) {
                     content = parsed.candidates[0].content.parts[0].text
-                }            
+                }
                 if (content !== undefined) {
                     const parts = this.splitContent(content);
                     for (const part of parts) {

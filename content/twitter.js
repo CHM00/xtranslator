@@ -116,7 +116,10 @@ function addBatchTranslationButton() {
         checkConfiguration();
     });
 
-    originalTweetNode.querySelector('div > div > div:nth-child(3) > div:nth-child(4) div').appendChild(translateButton);
+    const tweetTextNode = originalTweetNode.querySelector('div[data-testid="tweetText"]');
+    if (tweetTextNode && !tweetTextNode.parentElement.querySelector('.batch-translate-button')) {
+        tweetTextNode.insertAdjacentElement('afterend', translateButton);
+    }
 }
 
 function addSingleTweetTranslationButton(tweetNode) {
