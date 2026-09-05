@@ -73,6 +73,113 @@ class Configuration
     }
 }
 
+// Send the request through the background service worker (bypasses CORS),
+// and reassemble the streamed chunks into a ReadableStream.
+function connectAndFetch(url, options) {
+    return new Promise((resolve, reject) => {
+        const port = chrome.runtime.connect({ name: 'api-proxy' });
+
+        let controller = null;
+        let resolved = false;
+        let closed = false;
+        const queue = [];
+
+        const stream = new ReadableStream({
+            start(c) {
+                controller = c;
+                while (queue.length > 0) {
+                    const item = queue.shift();
+                    if (item === null) {
+                        closed = true;
+                        controller.close();
+                    } else {
+                        controller.enqueue(new TextEncoder().encode(item));
+                    }
+                }
+            },
+            cancel() {
+                port.disconnect();
+            }
+        });
+
+        const enqueue = (text) => {
+            if (closed) return;
+            if (controller) {
+                controller.enqueue(new TextEncoder().encode(text));
+            } else {
+                queue.push(text);
+            }
+        };
+
+        const close = () => {
+            if (closed) return;
+            if (controller) {
+                closed = true;
+                controller.close();
+            } else {
+                queue.push(null);
+            }
+        };
+
+        const fail = (message) => {
+            const error = new Error(message);
+            if (resolved) {
+                if (!closed && controller) {
+                    controller.error(error);
+                }
+            } else {
+                closed = true;
+                error.noResponse = true;
+                reject(error);
+            }
+        };
+
+        port.onMessage.addListener((msg) => {
+            if (msg.type === 'status') {
+                if (msg.status < 200 || msg.status >= 300) {
+                    return; // wait for the following 'error' message with details
+                }
+                resolved = true;
+                resolve(stream);
+            } else if (msg.type === 'chunk') {
+                enqueue(msg.chunk);
+            } else if (msg.type === 'done') {
+                close();
+                port.disconnect();
+            } else if (msg.type === 'error') {
+                fail(msg.message);
+                port.disconnect();
+            }
+        });
+
+        port.onDisconnect.addListener(() => {
+            if (!closed) {
+                const detail = (chrome.runtime.lastError && chrome.runtime.lastError.message) || 'Background connection closed unexpectedly';
+                fail(detail);
+            }
+        });
+
+        port.postMessage({ url, options });
+    });
+}
+
+// Retry once when the connection dropped before any response arrived
+// (the MV3 service worker may have been restarting).
+async function fetchViaBackground(url, options = {}) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            return await connectAndFetch(url, options);
+        } catch (error) {
+            lastError = error;
+            if (!error.noResponse) {
+                throw error;
+            }
+        }
+    }
+    throw lastError;
+}
+
 class Service {
     config = null;
     //prompt = "作为一个专业的翻译助理，请帮我将推文或youtube评论翻译成中文，要求结果通俗易懂，并保留原有格式。我将提供给你这种格式的数据：\n###随机字符串1\nText to be translated 1\n###随机字符串2\nText to be translated 2\n...\n请返回同样的格式，不要添加你的评论或任何markdown标记：\n###随机字符串1\n翻译后的文本1\n###随机字符串2\n翻译后的文本2\n...";
@@ -259,20 +366,16 @@ class OpenAIService extends Service
             'messages': messages,
         }
 
-        fetch(apiUrl, {
+        fetchViaBackground(apiUrl, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(data)
-        }).then((response) => {                
-            if (!response.ok) {
-                this.failCallback(new Error('HTTP Error, Code: ' + response.status));
-                return
-            }
-            
-            return response.body;
         })
         .then((stream) => {
-            this.readOpenAiLikeStream(stream);
+            this.readOpenAiLikeStream(stream).catch((error) => {
+                console.error(error);
+                this.failCallback(error);
+            });
         })
         .catch((error) => {
             console.error(error);
@@ -307,21 +410,16 @@ class GoogleService extends Service
             ]
         }
         
-        fetch(apiUrl, {
+        fetchViaBackground(apiUrl, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(data)
-        }).then((response) => {                
-            if (!response.ok) {
-                throw new Error('HTTP Error, Code: ' + response.status);
-                //this.failCallback(new Error('HTTP Error, Code: ' + response.status));
-                return
-            }
-            
-            return response.body;
         })
         .then((stream) => {
-            this.readGoogleStream(stream);
+            this.readGoogleStream(stream).catch((error) => {
+                console.error(error);
+                this.failCallback(error);
+            });
         })
         .catch((error) => {
             console.error(error);
@@ -332,4 +430,4 @@ class GoogleService extends Service
 
 const configuration = new Configuration();
 
-export { configuration, OpenAIService, GoogleService }
+export { configuration, OpenAIService, GoogleService, fetchViaBackground }

@@ -167,7 +167,8 @@
       <div class="mt-4">
         <button class="btn" @click="cancel">{{'cancel' | t}}</button>
         <button class="btn btn-error ml-2" @click="delete">{{ 'delete' | t}}</button>
-        <button class="btn btn-neutral ml-2" @click="saveConfig">{{ 'save' | t}}</button>        
+        <button class="btn ml-2" @click="testConnection" :disabled="testing">{{ 'test-connection' | t}}</button>
+        <button class="btn btn-neutral ml-2" @click="saveConfig">{{ 'save' | t}}</button>
       </div>
 
     </div>

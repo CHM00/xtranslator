@@ -10,9 +10,7 @@
     "128": "assets/icon128.png"
   },
   "host_permissions": [
-    "*://*.twitter.com/*",
-    "*://*.x.com/*",
-    "*://*.youtube.com/*"
+    "<all_urls>"
   ],
   "content_scripts": [
     {
